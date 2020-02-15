@@ -12,6 +12,8 @@ my $RUN_SLOW_TESTS_EVERY_CODE_POINT = 100;
 # If $ENV{PERL_RUN_SLOW_TESTS} is at least 1 and less than the number above,
 # all code points with names are tested.  If it is at least that number, all
 # 1,114,112 Unicode code points are tested.
+# Kind of as a lark, the percentage of wildcard names that is tested is about
+# $run_slow_tests+1, so that the minimum is 1%.
 
 # Because \N{} is compile time, any warnings will get generated before
 # execution, so have to have an array, and arrange things so no warning
@@ -114,6 +116,7 @@ sub get_loose_name ($) { # Modify name to stress the loose tests.
 }
 
 sub test_vianame ($$$) {
+    CORE::state $wildcard_count = 0;
 
     # Run the vianame tests on a code point, both loose and full
 
@@ -126,22 +129,53 @@ sub test_vianame ($$$) {
     # Get a copy of the name modified to stress the loose tests.
     my $loose_name = get_loose_name($name);
 
+    my $right_anchor;
+
     # Switch loose and full in vianame vs string_vianame half the time
     if (rand() < .5) {
         use charnames ":full";
         $all_pass &= is(charnames::vianame($name), $i, "Verify vianame(\"$name\") is 0x$hex");
         use charnames ":loose";
         $all_pass &= is(charnames::string_vianame($loose_name), chr($i), "Verify string_vianame(\"$loose_name\") is chr(0x$hex)");
+        $right_anchor = '\\Z';
     }
     else {
         use charnames ":loose";
         $all_pass &= is(charnames::vianame($loose_name), $i, "Verify vianame(\"$loose_name\") is 0x$hex");
         use charnames ":full";
         $all_pass &= is(charnames::string_vianame($name), chr($i), "Verify string_vianame(\"$name\") is chr(0x$hex)");
+        $right_anchor = '\\z';
     }
+
+    my $left_anchor = (rand() < .5) ? '^' : '\\A';
 
     # \p{name=} is always loose matching
     $all_pass &= like(chr($i), qr/^\p{name=$loose_name}$/, "Verify /\p{name=$loose_name}/ matches chr(0x$hex)");
+
+    $wildcard_count++;
+
+    # Because wildcard name matching is so real-time intensive, do it much
+    # less frequently than the others
+    if ($run_slow_tests >= 100 - $wildcard_count) {
+        $wildcard_count = 0;
+
+        # A few control characters have anomalous names containing
+        # parentheses, which need to be escaped.
+        my $name_ref = \$name;
+        my $mod_name;
+        if ($i <= 0x85) {   # NEL in ASCII; affected controls are lower than
+                            # this in EBCDIC
+            $mod_name = $name =~ s/([()])/\\$1/gr;
+            $name_ref = \$mod_name;
+        }
+
+        # We anchor the name, randomly with the possible anchors.
+        my $assembled = $left_anchor. $$name_ref . $right_anchor;
+
+        # \p{name=/.../} is always full matching
+        $all_pass &= like(chr($i), qr!^\p{name=/$assembled/}!,
+                          "Verify /\p{name=/$assembled/} matches chr(0x$hex)");
+    }
 
     return $all_pass;
 }
@@ -352,6 +386,10 @@ is(charnames::viacode("U+00000000000FEED"), "ARABIC LETTER WAW ISOLATED FORM", '
 
 test_vianame(0x116C, "116C", "HANGUL JUNGSEONG OE");
 test_vianame(0x1180, "1180", "HANGUL JUNGSEONG O-E");
+like(chr(0x59C3), qr/\p{name=\/\ACJK UNIFIED IDEOGRAPH-59C3\z\/}/,
+         'Verify name wildcards delimitters can be escaped');
+like(chr(0xD800), qr!\p{name=/\A\z/}!,
+                                'Verify works on matching an empty name');
 
 {
     no warnings 'deprecated';

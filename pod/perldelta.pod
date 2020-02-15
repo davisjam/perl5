@@ -47,12 +47,16 @@ that aren't part of the strict UCD (Unicode character database).  These
 two are used for examining inputs for security purposes.  Details on
 their usage is at L<https://www.unicode.org/reports/tr39/proposed.html>.
 
-=head2 It is now possible to write C<qr/\p{Name=...}/>, or C<\p{Na=...}>
+=head2 It is now possible to write C<qr/\p{Name=...}/>, or
+C<qr!\p{na=/(SMILING|GRINNING) FACE/}!>
 
 The Unicode Name property is now accessible in regular expression
-patterns using the above syntaxes, as an alternative to C<\N{...}>.
+patterns, as an alternative to C<\N{...}>.
 A comparison of the two methods is given in
 L<perlunicode/Comparison of \N{...} and \p{name=...}>.
+
+The second example above shows that wildcard subpatters are also usable
+in this property.  See L<perlunicode/Wildcards in Property Values>.
 
 =head2 The C<POSIX::mblen()>, C<mbtowc>, and C<wctomb> functions now
 work on shift state locales and are thread-safe on C99 and above
