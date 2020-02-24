@@ -33,6 +33,8 @@
  * with the POSIX routines of the same names.
 */
 
+/* #include <stdlib.h> */
+
 #ifdef PERL_EXT_RE_BUILD
 #include "re_top.h"
 #endif
@@ -5832,6 +5834,9 @@ S_regmatch(pTHX_ regmatch_info *reginfo, char *startpos, regnode *prog)
     I32 orig_savestack_ix = PL_savestack_ix;
     U8 * script_run_begin = NULL;
 
+		bool CACHE_POSSIBLE = TRUE;
+		char *DAVIS_USE_CACHE = NULL;
+
 /* Solaris Studio 12.3 messes up fetching PL_charclass['\n'] */
 #if (defined(__SUNPRO_C) && (__SUNPRO_C == 0x5120) && defined(__x86_64) && defined(USE_64_BIT_ALL))
 #  define SOLARIS_BAD_OPTIMIZER
@@ -5857,6 +5862,17 @@ S_regmatch(pTHX_ regmatch_info *reginfo, char *startpos, regnode *prog)
     /* Note that nextchr is a byte even in UTF */
     SET_nextchr;
     scan = prog;
+
+		/* Check if we'll use the cache at all */
+		DAVIS_USE_CACHE = getenv("DAVIS_USE_CACHE");
+
+		if (DAVIS_USE_CACHE != NULL && (strcmp(DAVIS_USE_CACHE, "no") == 0 || strcmp(DAVIS_USE_CACHE, "0") == 0)) {
+			CACHE_POSSIBLE = FALSE;
+		}
+		DEBUG_EXECUTE_r( Perl_re_printf( aTHX_
+		"%sCACHE_POSSIBLE:%d%s...\n",
+					PL_colors[4], CACHE_POSSIBLE, PL_colors[5])
+		);
 
     DEBUG_OPTIMISE_r( DEBUG_EXECUTE_r({
             DUMP_EXEC_POS( locinput, scan, utf8_target, depth );
@@ -8134,6 +8150,11 @@ NULL
              * WHILEM.
              */
 
+			DEBUG_EXECUTE_r( Perl_re_printf( aTHX_
+      "%sWHILEM: flags %d poscache_maxiter %d%s...\n",
+			      PL_colors[4], scan->flags, reginfo->poscache_maxiter, PL_colors[5])
+		    );
+
 	    if (scan->flags) {
 
 		if (!reginfo->poscache_maxiter) {
@@ -8149,23 +8170,36 @@ NULL
 		}
 
 		if (reginfo->poscache_iter-- == 0) {
-		    /* initialise cache */
-		    const SSize_t size = (reginfo->poscache_maxiter + 7)/8;
-                    regmatch_info_aux *const aux = reginfo->info_aux;
-		    if (aux->poscache) {
-			if ((SSize_t)reginfo->poscache_size < size) {
-			    Renew(aux->poscache, size, char);
-			    reginfo->poscache_size = size;
-			}
-			Zero(aux->poscache, size, char);
-		    }
-		    else {
-			reginfo->poscache_size = size;
-			Newxz(aux->poscache, size, char);
-		    }
+				if (CACHE_POSSIBLE) {
+					/* initialise cache */
+					const SSize_t size = (reginfo->poscache_maxiter + 7)/8;
+											regmatch_info_aux *const aux = reginfo->info_aux;
+					if (aux->poscache) {
+				if ((SSize_t)reginfo->poscache_size < size) {
+						Renew(aux->poscache, size, char);
+						reginfo->poscache_size = size;
+				}
+				Zero(aux->poscache, size, char);
+					}
+					else {
+				reginfo->poscache_size = size;
+				Newxz(aux->poscache, size, char);
+					}
+											DEBUG_EXECUTE_r( Perl_re_printf( aTHX_
+				"%sWHILEM: Detected a super-linear match, switching on caching%s...\n",
+							PL_colors[4], PL_colors[5])
+					);
+				} else {
+							DEBUG_EXECUTE_r( Perl_re_printf( aTHX_
+				"%sWHILEM: Rejecting caching opportunity%s...\n",
+							PL_colors[4], PL_colors[5]));
+					reginfo->poscache_iter = reginfo->poscache_maxiter;
+				}
+		}
+		else if (reginfo->poscache_iter % 100 == 0) {
                     DEBUG_EXECUTE_r( Perl_re_printf( aTHX_
-      "%sWHILEM: Detected a super-linear match, switching on caching%s...\n",
-			      PL_colors[4], PL_colors[5])
+      "%sWHILEM: %d WHILEM iter before enabling poscache%s...\n",
+			      PL_colors[4], reginfo->poscache_iter, PL_colors[5])
 		    );
 		}
 
